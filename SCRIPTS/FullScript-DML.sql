@@ -466,3 +466,144 @@ SELECT C.CODIGO, C.NOME, C.RUA, C.NR, C.BAIRRO, C.COMPLEMENTO, C.CIDADE, C.UF, C
 FROM CLIENTE C
 LEFT JOIN PF ON C.CODIGO = PF.CODIGO_CLI
 LEFT JOIN PJ ON C.CODIGO = PJ.CODIGO_CLI;
+
+/*
+BD2 - 2o Bim -Atividade de SQL - Exercícios de DML - Select - Queries dificuldade alta
+Queries implementadas na linguagem SQL aplicadas no SGBDR Oracle, apoiadas no
+SqlDeveloper. Utilizar o MER Físico e BD Pedido disponibilizado para treinamento da disciplina
+de Banco de Dados.
+Fazer um plano de execução estimado para a query apresentada a seguir:
+SELECT NUMERO,
+DATA,
+TOTAL_FATURA AS TOTAL,
+NOME AS CLIENTE,
+CNPF,
+CNPJ
+FROM PEDIDO JOIN
+VIEW_CLIENTE ON CODIGO_CLI=CODIGO
+WHERE TOTAL_FATURA < 10000;
+*/
+
+-- a. Executar e apresentar a análise do plano de execução da query.
+-- RESOLUÇÃO:
+EXPLAIN PLAN SET STATEMENT_ID = 'Query_pedido_view_cliente' FOR
+SELECT P.NUMERO,
+       P.DATA,
+       P.TOTAL_FATURA AS TOTAL,
+       V.NOME AS CLIENTE,
+       V.CNPF,
+       V.CNPJ
+FROM PEDIDO P
+JOIN VIEW_CLIENTE V ON P.CODIGO_CLI = V.CODIGO
+WHERE P.TOTAL_FATURA < 10000;
+
+SELECT PLAN_TABLE_OUTPUT
+FROM TABLE(DBMS_XPLAN.DISPLAY('PLAN_TABLE', 'Query_pedido_view_cliente', 'TYPICAL'));
+
+/* A análise detalhada (operações, estimativas de linhas e custo) deve ser feita
+com a saída do DBMS_XPLAN no Oracle. VIEW_CLIENTE expande para CLIENTE,
+PF e PJ; o caminho de acesso depende das estatísticas e da seletividade. */
+
+-- b. Apresente uma proposta para otimizar a execução query.
+-- RESPOSTA:
+
+/* Criar um índice para a coluna usada no filtro de faixa. O otimizador poderá
+escolher um INDEX RANGE SCAN quando o filtro for seletivo; caso contrário,
+um FULL TABLE SCAN pode continuar sendo mais barato. */
+
+CREATE INDEX IND_PEDIDO_TOTAL_FATURA
+    ON PEDIDO (TOTAL_FATURA);
+
+-- c. Executar e apresentar a análise do plano de execução com a proposta apresentada no item b.
+-- RESOLUÇÃO:
+EXPLAIN PLAN SET STATEMENT_ID = 'Query_pedido_view_cliente_otimizada' FOR
+SELECT P.NUMERO,
+       P.DATA,
+       P.TOTAL_FATURA AS TOTAL,
+       V.NOME AS CLIENTE,
+       V.CNPF,
+       V.CNPJ
+FROM PEDIDO P
+JOIN VIEW_CLIENTE V ON P.CODIGO_CLI = V.CODIGO
+WHERE P.TOTAL_FATURA < 10000;
+
+SELECT PLAN_TABLE_OUTPUT
+FROM TABLE(DBMS_XPLAN.DISPLAY('PLAN_TABLE', 'Query_pedido_view_cliente_otimizada', 'TYPICAL'));
+
+/* Compare esta saída com Query_pedido_view_cliente, especialmente o acesso a PEDIDO e o custo
+estimado. O uso do índice e o custo efetivo só podem ser confirmados no Oracle. */
+
+-- d. Em termos de custos, qual foi o ganho obtido com sua estratégia de otimização.
+-- RESPOSTA:
+
+/*
+BD2 - 2o Bim -Atividade de SQL - Exercícios de DML - Select - Queries dificuldade alta - 1
+Queries implementadas na linguagem SQL aplicadas no SGBDR Oracle, apoiadas no
+SqlDeveloper. Utilizar o MER Físico e BD Pedido disponibilizado para treinamento da disciplina
+de Banco de Dados.
+Selecionar dados em tabelas do projeto PEDIDO, em conformidade com os enunciados a
+seguir:
+*/
+
+-- a. Criar a view que mostra estoque constante no BD Pedidos.
+-- (VIEW_ESTOQUE) contendo os dados indicados no modelo apresentado.
+-- Analise os dados gerados na view. Faça os ajustes na view para não
+-- mostrar dados inconsistentes, do tipo ter saído mais do que
+-- foi adquirido, bem como não mostrar valores nulos.
+-- RESOLUÇÃO:
+
+CREATE OR REPLACE VIEW VIEW_ESTOQUE AS
+SELECT 
+    P.DESCRICAO AS PRODUTO,
+    NVL(E.QTD_ENTRADA, 0) AS QUANTIDADE_ADQUIRIDA,
+    NVL(I.QTD_SAIDA, 0) AS QUANTIDADE_SAIDA,
+    (NVL(E.QTD_ENTRADA, 0) - NVL(I.QTD_SAIDA, 0)) AS DISPONIVEL,
+    P.UNID_MEDIDA
+FROM PRODUTO P
+LEFT JOIN (
+    SELECT CODIGO_PRO, SUM(QUANTIDADE) AS QTD_ENTRADA
+    FROM ESTOQUE
+    GROUP BY CODIGO_PRO
+) E ON P.CODIGO = E.CODIGO_PRO
+LEFT JOIN (
+    SELECT CODIGO_PRO, SUM(QUANTIDADE) AS QTD_SAIDA
+    FROM ITEM_PRODUTO
+    GROUP BY CODIGO_PRO
+) I ON P.CODIGO = I.CODIGO_PRO;
+
+
+--VISUALIZANDO:
+SELECT * FROM VIEW_ESTOQUE;
+
+-- Das 11 linhas retornadas, 6 apresnetaram valores negativos na colina disponivel pois QUANTIDADE_SAIDA > QUANTIDADE_ADQUIRIDA. 
+
+--AJUSTANDO:
+CREATE OR REPLACE VIEW VIEW_ESTOQUE (
+    PRODUTO,
+    QUANTIDADE_ADQUIRIDA,
+    QUANTIDADE_SAIDA,
+    DISPONIVEL,
+    UNID_MEDIDA
+) AS
+SELECT 
+    P.DESCRICAO,
+    NVL(E.TOTAL_ADQUIRIDO, 0),
+    NVL(I.TOTAL_SAIDA, 0),
+    NVL(E.TOTAL_ADQUIRIDO, 0) - NVL(I.TOTAL_SAIDA, 0),
+    P.UNID_MEDIDA
+FROM PRODUTO P
+LEFT JOIN (
+    SELECT CODIGO_PRO, SUM(QUANTIDADE) AS TOTAL_ADQUIRIDO
+    FROM ESTOQUE
+    GROUP BY CODIGO_PRO
+) E ON P.CODIGO = E.CODIGO_PRO
+LEFT JOIN (
+    SELECT CODIGO_PRO, SUM(QUANTIDADE) AS TOTAL_SAIDA
+    FROM ITEM_PRODUTO
+    GROUP BY CODIGO_PRO
+) I ON P.CODIGO = I.CODIGO_PRO
+WHERE NVL(E.TOTAL_ADQUIRIDO, 0) >= NVL(I.TOTAL_SAIDA, 0);
+
+-- Elimina da visualização qualquer produto com dados inconsistentes (onde a QUANTIDADE_SAIDA seja maior que a QUANTIDADE_ADQUIRIDA, o que geraria estoque negativo).
+
+SELECT * FROM VIEW_ESTOQUE;
